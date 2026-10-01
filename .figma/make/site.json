@@ -1,0 +1,10 @@
+{
+  "description": "This web application offers a digital twin experience for users, enabling interactive simulations and visualizations that enhance understanding and engagement.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

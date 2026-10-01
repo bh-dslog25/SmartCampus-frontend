@@ -1,0 +1,1016 @@
+Create a production-oriented frontend for the **SmartCampus AI Agent** IoT operations system.
+
+Use:
+
+* React
+* TypeScript
+* Tailwind CSS
+* ThreeJS
+
+The frontend must be designed around the actual backend data contracts.
+
+IMPORTANT:
+
+* Do not invent backend fields.
+* Do not invent AI response fields.
+* Do not expose hidden chain-of-thought.
+* Do not create fake operational metrics.
+* Use mock data only where necessary for prototype visualization.
+* Clearly distinguish IoT data, AI Agent responses, and operator actions.
+
+Backend:
+
+* Edge Gateway: `http://localhost:8000`
+* AI Service: `http://localhost:8001`
+* AI evaluation endpoint: `POST /api/evaluate`
+* Health endpoint: `GET /health`
+
+==================================================
+
+1. APPLICATION STRUCTURE
+   ==================================================
+
+Create exactly 6 main navigation modules:
+
+1. Dashboard
+2. Alerts & Decisions
+3. History & Devices
+4. Audit Logs
+5. AI Assistant
+6. Settings
+
+Do NOT create separate main navigation items for:
+
+* Live Monitoring
+* Rooms
+* Room Details
+* Alerts
+* AI Decisions
+* History
+* Devices
+* SOP Knowledge
+
+These functions must be integrated into the six modules above.
+
+Navigation:
+
+SmartCampus AI
+
+Dashboard
+Alerts & Decisions
+History & Devices
+Audit Logs
+AI Assistant
+Settings
+
+Use a simple left sidebar.
+
+Keep navigation compact and quiet.
+
+Use simple line icons.
+
+Highlight only the active menu item.
+
+==================================================
+2. BACKEND DATA CONTRACT
+========================
+
+The AI receives an `OperationalContext`.
+
+Room:
+
+* room_id
+* room_name
+* room_type
+* current_mode
+* smoke_state
+
+Telemetry Summary:
+
+* window_start
+* window_end
+* temperature: min, max, avg, latest
+* humidity: min, max, avg, latest
+* co2: min, max, avg, latest
+* smoke_value: min, max, avg, latest
+* air_quality: min, max, avg, latest
+
+Occupancy:
+
+* current_count
+* total_in
+* total_out
+* trend
+
+Active Session:
+
+* session_id
+* lecturer_name
+* class_code
+* started_at
+* attendance_deadline
+* is_exam
+* checked_in_count
+* enrolled_count
+
+Recent Events:
+
+* type
+* time
+* extra
+
+Environment Context:
+
+* source
+* since
+* row_count
+* readings
+
+EnvironmentReading can contain:
+
+* environment_id
+* room_id
+* temperature
+* humidity
+* smoke_detected
+* smoke_value
+* smoke_threshold
+* smoke_state
+* co2
+* air_quality
+* room_mode
+* message_id
+* source_timestamp
+* gateway_received_timestamp
+* environment_timestamp
+
+==================================================
+3. AGENT RESPONSE
+=================
+
+The AI Agent returns:
+
+* event_id
+* recommendation
+* alternatives
+* analysis
+* skip
+* skip_reason
+* tool_calls_log
+* structured_trace
+* is_fallback
+* fallback_levels
+* fallback_audit_log
+
+Use these concepts exactly.
+
+Do not invent additional AI response fields.
+
+==================================================
+4. DASHBOARD
+============
+
+Dashboard is the ONLY main monitoring page.
+
+It replaces:
+
+* Live Monitoring
+* Rooms
+
+Dashboard should provide a clean overview of the entire campus.
+
+Layout:
+
+Page Header
+
+Summary Metrics
+
+Realtime Sensors
+
+Room Monitoring Grid
+
+Recent Alerts
+
+Latest AI Decisions
+
+System Status
+
+### Summary
+
+Show only metrics supported by the backend:
+
+* Total Rooms
+* Rooms with Active Alerts
+* Active Rooms
+* Device Status
+* System Health
+
+Do NOT invent:
+
+* room capacity
+* device battery
+* online percentage
+* occupancy percentage
+* unsupported severity metrics
+
+### Realtime Sensors
+
+Show:
+
+* Temperature
+* Humidity
+* CO2
+* Smoke
+* Air Quality
+
+Use simple compact sensor rows/cards.
+
+Show:
+
+* Latest value
+* Room
+* Timestamp when available
+
+### Room Monitoring Grid
+
+Create a clean monitoring grid.
+
+Example:
+
+Room A101
+
+Temperature  28.5 °C
+Humidity     61 %
+CO2          720 ppm
+Smoke        Normal
+Mode         Auto
+Status       Online
+
+Room A102
+
+Temperature  27.8 °C
+Humidity     58 %
+CO2          680 ppm
+Smoke        Normal
+Mode         Auto
+Status       Online
+
+Use a consistent layout for every room.
+
+Do not overload room cards with unnecessary information.
+
+Clicking a room opens a Room Detail drawer.
+
+Do NOT create a separate Room page in the main navigation.
+
+### Recent Alerts
+
+Show recent important events.
+
+Example:
+
+Smoke detected
+Room A101
+Smoke value: 520
+Threshold: 400
+00:32:15
+
+[View Decision]
+
+### Latest AI Decisions
+
+Show:
+
+* Event ID
+* Room
+* Analysis Summary
+* Recommendation
+* Confidence
+* Urgency
+* Status
+
+Clicking opens the corresponding decision detail.
+
+==================================================
+5. ROOM DETAIL DRAWER
+=====================
+
+Room Detail is a drawer or expandable panel from Dashboard.
+
+Show:
+
+* Room Context
+* Telemetry Summary
+* Occupancy
+* Active Session
+* Recent Events
+* Environment Context
+* AI Decisions for the room
+
+Room Context contains only:
+
+* Room Name
+* Room ID
+* Room Type
+* Current Mode
+* Smoke State
+
+Do not invent other room properties.
+
+==================================================
+6. ALERTS & DECISIONS
+=====================
+
+Combine Alerts and AI Decisions.
+
+Tabs:
+
+[ All ] [ Alerts ] [ AI Decisions ]
+
+### Alerts
+
+Display:
+
+* Event ID
+* Event Type
+* Room
+* Time
+* Severity only if supplied
+* Status
+* AI Evaluation Status
+
+Clicking opens AI Decision Detail.
+
+### AI Decisions
+
+Display:
+
+* Event ID
+* Room
+* Analysis Summary
+* Recommendation
+* Confidence
+* Urgency
+* Skip
+* Fallback
+* Status
+
+Clicking opens AI Decision Detail.
+
+==================================================
+7. AI DECISION DETAIL
+=====================
+
+Use a clean detail layout.
+
+Sections:
+
+1. Event Summary
+2. Room Context
+3. Telemetry Summary
+4. Occupancy
+5. Active Session
+6. Recent Events
+7. Environment Context
+8. AI Recommendation
+9. Alternative Recommendations
+10. AI Analysis
+11. Structured Trace
+12. Agent Tool Activity
+13. Fallback Information
+
+Do not make this page visually overwhelming.
+
+Use sections with clear headings and collapsible details where appropriate.
+
+==================================================
+8. TELEMETRY
+============
+
+For:
+
+* Temperature
+* Humidity
+* CO2
+* Smoke
+* Air Quality
+
+Show:
+
+* Latest
+* Average
+* Minimum
+* Maximum
+
+Show:
+
+`window_start → window_end`
+
+Use simple compact components.
+
+No decorative charts unless historical data exists.
+
+==================================================
+9. OCCUPANCY
+============
+
+Show:
+
+* Current Count
+* Total In
+* Total Out
+* Trend
+
+Do not invent capacity.
+
+==================================================
+10. ACTIVE SESSION
+==================
+
+If active_session exists:
+
+Show:
+
+* Lecturer
+* Class Code
+* Started At
+* Attendance Deadline
+* Exam Status
+* Checked-in Count
+* Enrolled Count
+
+If null:
+
+"No active session"
+
+==================================================
+11. RECENT EVENTS
+=================
+
+Use a simple timeline.
+
+Each event:
+
+* Event Type
+* Time
+* Extra data
+
+Allow `extra` to expand.
+
+==================================================
+12. ENVIRONMENT CONTEXT
+=======================
+
+Use an expandable section.
+
+Show:
+
+* Source
+* Since
+* Row Count
+
+Table:
+
+Timestamp
+Temperature
+Humidity
+Smoke
+Smoke Value
+CO2
+Air Quality
+Room Mode
+
+==================================================
+13. AI RECOMMENDATION
+=====================
+
+If recommendation exists:
+
+AI Recommendation
+
+Tool:
+set_fan
+
+Confidence:
+94%
+
+Urgency:
+HIGH
+
+Reason:
+Abnormal temperature condition detected.
+
+Parameters:
+
+mode: cooling
+speed: high
+
+Buttons:
+
+[Approve Action] [Reject Action]
+
+IMPORTANT:
+
+The frontend must never execute an AI recommendation automatically.
+
+Clearly distinguish:
+
+* Recommended
+* Pending Approval
+* Approved
+* Executed
+* Rejected
+* Skipped
+* Fallback
+
+==================================================
+14. ALTERNATIVES
+================
+
+If alternatives exist, show:
+
+* Tool
+* Parameters
+* Reason
+* Confidence
+* Urgency
+
+Label:
+
+Alternative Action
+
+Do not imply execution.
+
+==================================================
+15. AI ANALYSIS
+===============
+
+Display only the final analysis returned by the backend.
+
+Do not display hidden reasoning or chain-of-thought.
+
+==================================================
+16. SKIP STATE
+==============
+
+If:
+
+`skip = true`
+
+Hide approval buttons.
+
+Display:
+
+Action skipped
+
+Reason:
+
+`skip_reason`
+
+==================================================
+17. STRUCTURED TRACE
+====================
+
+Create an expandable AI Evaluation Trace.
+
+Each step may contain:
+
+* step
+* decision
+* tool
+* reason_code
+* evidence_ids
+* observation_summary
+* action_input
+
+Display as a simple chronological timeline.
+
+Do not expose hidden chain-of-thought.
+
+==================================================
+18. TOOL ACTIVITY
+=================
+
+Create an Agent Tool Activity section.
+
+Display:
+
+Tool
+Status
+Result
+Timestamp
+
+Expandable:
+
+* Parameters
+* Detail
+* Component
+
+Each entry contains:
+
+* tool
+* params
+* result_summary
+* level
+* detail
+* component
+* timestamp
+
+==================================================
+19. FALLBACK
+============
+
+If:
+
+`is_fallback = true`
+
+Display:
+
+Fallback Mode
+
+Show:
+
+* Fallback Levels
+* Fallback Audit Log
+
+Keep `fallback_audit_log` completely separate from `tool_calls_log`.
+
+If false, hide the fallback section.
+
+==================================================
+20. HISTORY & DEVICES
+=====================
+
+Two tabs:
+
+[ History ] [ Devices ]
+
+### History
+
+Show:
+
+* Temperature history
+* Humidity history
+* CO2 history
+* Smoke history
+* Occupancy
+* Previous events
+* Previous AI decisions
+
+Use simple charts only when historical data exists.
+
+Filters:
+
+* Room
+* Data type
+* Time range
+
+### Devices
+
+Show available IoT devices.
+
+Examples:
+
+ESP32
+DHT22
+MQ2
+CO2 Sensor
+RFID
+Door
+Fan
+Buzzer
+LED
+
+Table:
+
+Device
+Room
+Status
+
+Use status colors only where useful.
+
+==================================================
+21. AUDIT LOGS
+==============
+
+Two tabs:
+
+[ Agent Tool Calls ] [ Fallback Audit ]
+
+### Agent Tool Calls
+
+Columns:
+
+Timestamp
+Component
+Tool
+Parameters
+Result
+Level
+Detail
+
+### Fallback Audit
+
+Columns:
+
+Timestamp
+Fallback Level
+Reason
+Detail
+
+Never mix the two log types.
+
+==================================================
+22. AI ASSISTANT
+================
+
+AI Assistant is the UI for the same:
+
+AI Agent + RAG backend.
+
+It is NOT a separate generic chatbot.
+
+The assistant can help operators understand:
+
+* Room context
+* Sensor readings
+* Recent events
+* AI decisions
+* SOP information
+* Recommendations
+
+Example:
+
+User:
+Why is room A101 alarming?
+
+AI:
+Smoke level is 520, above the configured threshold of 400.
+
+Recommended action:
+trigger_buzzer
+
+Confidence:
+94%
+
+Urgency:
+High
+
+[View Decision]
+
+Use simple chat bubbles.
+
+Use compact sections for:
+
+* Answer
+* Evidence
+* Recommendation
+* Tool
+* Confidence
+* Urgency
+
+Do not use AI avatars, glowing effects, or decorative AI graphics.
+
+If the assistant proposes an action, use the same approval workflow as AI Decision Detail.
+
+==================================================
+23. SETTINGS
+============
+
+Keep Settings minimal.
+
+General:
+
+* Campus configuration
+* Realtime connection
+* Notification settings
+
+AI:
+
+* Agent configuration
+* RAG configuration
+* Fallback configuration
+
+System:
+
+* API status
+* WebSocket status
+
+==================================================
+24. REALTIME UX
+===============
+
+Use WebSocket updates for:
+
+* Room values
+* Alerts
+* AI decisions
+* Device status
+
+Use subtle status indicators:
+
+LIVE
+CONNECTED
+UPDATED
+
+Avoid excessive animation.
+
+Only use small transitions for:
+
+* drawers
+* expanding sections
+* hover
+* realtime updates
+
+==================================================
+25. VISUAL DESIGN
+=================
+
+The entire application must follow a **minimal enterprise design**.
+
+Primary visual characteristics:
+
+* Clean
+* Simple
+* Professional
+* Neutral
+* Functional
+* Easy to scan
+* Low visual noise
+
+Color palette:
+
+* Light gray / white background
+* Dark gray text
+* Neutral gray borders
+* One restrained blue accent
+
+Status colors ONLY:
+
+* Red = critical
+* Orange = warning
+* Green = success/online
+* Blue = information
+
+Do NOT use:
+
+* gradients
+* neon colors
+* purple AI theme
+* glowing effects
+* glassmorphism
+* 3D effects
+* futuristic decorations
+* excessive shadows
+* colorful backgrounds
+* oversized cards
+* excessive rounded corners
+
+Cards should use:
+
+* subtle border
+* small shadow
+* moderate radius
+* consistent spacing
+
+Do not make every piece of information a separate card.
+
+Prefer:
+
+* tables
+* compact sections
+* simple rows
+* clear typography
+
+==================================================
+26. TYPOGRAPHY
+==============
+
+Use a clean modern sans-serif font.
+
+Hierarchy:
+
+Page title
+Section title
+Label
+Value
+Secondary information
+
+Avoid extremely large headings.
+
+Keep sensor values readable but not oversized.
+
+==================================================
+27. DASHBOARD VISUAL STRUCTURE
+==============================
+
+Use this visual hierarchy:
+
+Header
+
+Summary Metrics
+
+Realtime Sensors
+
+Room Monitoring Grid
+
+Recent Alerts / Latest AI Decisions
+
+System Status
+
+Keep spacing consistent.
+
+Do not fill every empty space with widgets.
+
+==================================================
+28. INFORMATION HIERARCHY
+=========================
+
+Prioritize:
+
+1. Critical events
+2. Current room state
+3. AI recommendation
+4. Confidence and urgency
+5. Operator approval
+6. AI analysis
+7. Evidence
+8. Structured trace
+9. Tool activity
+10. Audit information
+
+==================================================
+29. RESPONSIVE DESIGN
+=====================
+
+Desktop:
+
+Optimize for 1440px+.
+
+Tablet:
+
+Responsive two-column layouts.
+
+Mobile:
+
+Single-column layouts.
+
+Room Monitoring Grid:
+
+Desktop → multiple columns
+Tablet → two columns
+Mobile → one column
+
+==================================================
+30. FINAL WORKFLOW
+==================
+
+The UI must communicate:
+
+IoT Event
+↓
+Operational Context
+↓
+ReAct AI Agent
+↓
+Structured Evaluation
+↓
+Recommendation / Skip
+↓
+Operator Approval
+↓
+Control Action
+↓
+Audit Log
+
+==================================================
+31. STRICT DATA RULE
+====================
+
+Never invent:
+
+* room capacity
+* device battery
+* online percentage
+* unsupported severity
+* unsupported confidence
+* fake sensor values
+* fake AI reasoning
+* fake execution status
+* unsupported room properties
+
+If data does not exist:
+
+Hide the field or show a simple unavailable state.
+
+The final application should feel like a real internal SmartCampus IoT management platform.
+
+It should be:
+
+MINIMAL
+CLEAR
+PROFESSIONAL
+OPERATIONAL
+EASY TO MONITOR
+
+Do not make it look like a futuristic AI demo or a colorful SaaS template.
