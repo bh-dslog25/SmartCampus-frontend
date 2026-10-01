@@ -167,7 +167,7 @@ code { color: #315f9f; background: #f0f4f9; border-radius: 4px; padding: 3px 5px
 .assistant-main { padding: 20px; display: flex; flex-direction: column; }
 .chat { flex: 1; padding: 22px 5% 15px; min-height: 480px; }
 .chat-day { text-align: center; color: #a1a9b4; font-size: 8px; margin-bottom: 20px; }
-.bubble { max-width: 74%; border-radius: 9px; padding: 12px 14px; font-size: 10px; line-height: 1.6; margin-bottom: 15px; }
+.bubble { max-width: 80%; border-radius: 9px; padding: 12px 14px; font-size: 10px; line-height: 1.6; margin-bottom: 15px; white-space: pre-wrap; word-break: break-word; }
 .bubble.user { margin-left: auto; background: #286fdf; color: white; border-bottom-right-radius: 3px; }
 .bubble.ai { background: #f5f7fa; border: 1px solid #e7eaee; border-bottom-left-radius: 3px; }
 .bubble-label { color: #3c70be; font-size: 8px; font-weight: 700; display: flex; gap: 6px; align-items: center; }
@@ -264,3 +264,489 @@ code { color: #315f9f; background: #f0f4f9; border-radius: 4px; padding: 3px 5px
   .metrics { grid-template-columns: repeat(3, 1fr); }
   .room-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* -------------------------------------------------------------
+ * HITL (Human-in-the-Loop) & Actuator Execution Styles
+ * ----------------------------------------------------------- */
+.hitl-toggle-container {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 10px;
+  border: 1px solid #dce2e9;
+  background: #f8fafc;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.hitl-toggle-container:hover {
+  filter: brightness(0.97);
+}
+.hitl-toggle-container.active {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+.hitl-toggle-container.autopilot {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+.toggle-switch {
+  width: 32px;
+  height: 18px;
+  background: #cbd5e1;
+  border-radius: 9px;
+  position: relative;
+  transition: background-color 0.2s ease;
+  flex-shrink: 0;
+}
+.toggle-switch.on {
+  background: #10b981;
+}
+.toggle-switch.off {
+  background: #f59e0b;
+}
+.toggle-knob {
+  width: 14px;
+  height: 14px;
+  background: white;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+.toggle-switch.on .toggle-knob {
+  transform: translateX(14px);
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.result-banner {
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 9px;
+  line-height: 1.5;
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.result-banner.success {
+  background: #e6f7ef;
+  border: 1px solid #a8e6cf;
+  color: #126343;
+}
+.result-banner.warning {
+  background: #fef7e6;
+  border: 1px solid #fed89b;
+  color: #8c570b;
+}
+.result-banner.error {
+  background: #feeaea;
+  border: 1px solid #f9b4b4;
+  color: #9e2323;
+}
+.autopilot-notice {
+  background: #fff8e6;
+  border: 1px solid #f6cf7d;
+  color: #8c5600;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+}
+
+/* -------------------------------------------------------------
+ * RBAC (Role-Based Access Control) & Login Modal Styles
+ * ----------------------------------------------------------- */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.login-card {
+  width: 100%;
+  max-width: 440px;
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  animation: modalScale .2s ease-out;
+}
+@keyframes modalScale {
+  from { transform: scale(0.96); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.login-head {
+  padding: 24px 28px 18px;
+  background: #0f172a;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.login-head .brand-logo {
+  width: 42px;
+  height: 42px;
+  background: #2563eb;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: white;
+}
+.login-body {
+  padding: 24px 28px;
+}
+.input-group {
+  margin-bottom: 15px;
+}
+.input-group label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 6px;
+}
+.input-group input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 12px;
+  outline: none;
+  transition: border-color .15s;
+}
+.input-group input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+.quick-login-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed #e2e8f0;
+}
+.quick-login-section h4 {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #64748b;
+  margin: 0 0 10px;
+}
+.quick-login-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.quick-login-btn {
+  padding: 10px 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transition: all .15s ease;
+  font-size: 10px;
+}
+.quick-login-btn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  transform: translateY(-1px);
+}
+.quick-login-btn strong {
+  font-size: 11px;
+}
+.quick-login-btn small {
+  font-size: 8px;
+  color: #64748b;
+}
+
+/* User Popover Menu in Sidebar */
+.user-menu-popover {
+  position: absolute;
+  bottom: 65px;
+  left: 14px;
+  width: 210px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+  padding: 10px;
+  z-index: 50;
+  animation: slideInUp .15s ease-out;
+}
+@keyframes slideInUp {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.user-menu-popover .user-info {
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #334155;
+}
+.user-menu-popover .user-info strong {
+  color: white;
+  font-size: 12px;
+  display: block;
+}
+.user-menu-popover .user-info small {
+  color: #94a3b8;
+  font-size: 9px;
+}
+.user-menu-btn {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  transition: background .15s;
+}
+.user-menu-btn:hover {
+  background: #334155;
+  color: white;
+}
+.user-menu-btn.logout {
+  color: #f87171;
+}
+.user-menu-btn.logout:hover {
+  background: #7f1d1d;
+  color: #fecaca;
+}
+
+/* Role Badges */
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.role-badge.admin {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+.role-badge.lecturer {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+.role-badge.student {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.rbac-warning-card {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  font-size: 9px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+/* ---------------------------------------------------------------------------
+   Corridor RFID Card Registration & Approval Styles (FR-RF-01)
+   --------------------------------------------------------------------------- */
+.corridor-toast-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  color: white;
+  padding: 12px 20px;
+  border-radius: 10px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
+  border: 1px solid #3b82f6;
+  margin-bottom: 20px;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.rfid-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.rfid-stat-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  transition: all 0.2s ease;
+}
+
+.rfid-stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+}
+
+.rfid-stat-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.rfid-stat-icon.total { background: #eff6ff; color: #2563eb; }
+.rfid-stat-icon.pending { background: #fef3c7; color: #d97706; }
+.rfid-stat-icon.approved { background: #ecfdf5; color: #059669; }
+.rfid-stat-icon.rejected { background: #fef2f2; color: #dc2626; }
+
+.rfid-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.rfid-badge.pending {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.rfid-badge.approved {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.rfid-badge.rejected {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.btn-approve-sm {
+  background: #059669;
+  color: white;
+  border: 0;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background 0.15s ease;
+}
+
+.btn-approve-sm:hover {
+  background: #047857;
+}
+
+.btn-reject-sm {
+  background: white;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.btn-reject-sm:hover {
+  background: #fef2f2;
+}
+
+.btn-simulate {
+  background: #2563eb;
+  color: white;
+  border: 0;
+  padding: 8px 14px;
+  border-radius: 7px;
+  font-size: 9px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+  transition: all 0.15s ease;
+}
+
+.btn-simulate:hover {
+  background: #1d4ed8;
+}
+
+.corridor-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  z-index: 100;
+  padding: 20px;
+  animation: fadeIn 0.2s ease;
+}
+
+.corridor-modal-box {
+  background: white;
+  border-radius: 14px;
+  width: 100%;
+  max-width: 520px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+
+
