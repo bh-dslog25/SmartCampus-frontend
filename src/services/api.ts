@@ -207,6 +207,19 @@ export async function getRooms(): Promise<RoomData[]> {
   }
 }
 
+export async function updateRoomState(roomId: string, mode: string): Promise<RoomData> {
+  const res = await authFetch(`/api/rooms/${roomId}/state`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Cập nhật trạng thái phòng thất bại: ${errText}`);
+  }
+  return await res.json();
+}
+
 // ---------------------------------------------------------------------------
 // Recommendations & HITL APIs
 // ---------------------------------------------------------------------------
@@ -534,6 +547,28 @@ export async function getRecentEvents(): Promise<RecentEventItem[]> {
     return [];
   }
 }
+
+// ---------------------------------------------------------------------------
+// Simulate send_alert Tool Call (Testing & Demonstration)
+// ---------------------------------------------------------------------------
+export async function simulateAlert(payload?: {
+  room_id?: string;
+  message?: string;
+  level?: "info" | "warning" | "critical";
+  reason?: string;
+}): Promise<any> {
+  const res = await authFetch("/api/recommendations/simulate-alert", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Mô phỏng gửi cảnh báo thất bại: ${errText}`);
+  }
+  return await res.json();
+}
+
 
 
 

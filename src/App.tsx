@@ -60,6 +60,8 @@ import {
   approveCardRegistration,
   rejectCardRegistration,
   simulateCorridorCardScan,
+  simulateAlert,
+  updateRoomState,
   type CardRegistrationRequestItem,
   askAiAssistant,
   login,
@@ -92,6 +94,24 @@ type Page =
   | "Audit Logs"
   | "AI Assistant"
   | "Settings";
+
+export interface AlertPopupData {
+  id: string;
+  recommendation_id?: string;
+  event_id?: string;
+  room_id?: string;
+  room_name?: string;
+  tool_name: string;
+  message: string;
+  level: "info" | "warning" | "critical" | string;
+  reason?: string;
+  confidence?: number;
+  urgency?: string;
+  status?: string; // "pending" | "approved" | "auto_approved" | "rejected"
+  timestamp: string;
+  is_auto?: boolean;
+  operator?: string;
+}
 
 export type Room = {
   id: string;
@@ -699,12 +719,44 @@ function AlertsPage({
               : "Đánh giá sự kiện và phê duyệt hành động do AI Agent đề xuất trước khi phát lệnh phần cứng."}
           </p>
         </div>
-        <HitlToggleSwitch
-          enabled={hitlEnabled}
-          loading={hitlLoading}
-          onToggle={onToggleHitl}
-          disabled={currentUser?.role !== "admin"}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            className="outline-button"
+            onClick={async () => {
+              try {
+                await simulateAlert({
+                  message: "Phát hiện sự cố quẹt thẻ lạ và cảm biến bất thường tại Phòng học 402!",
+                  level: "warning",
+                  reason: "AI Agent đối chiếu RFID thẻ với thời khóa biểu và phát hiện vi phạm quy chế an toàn.",
+                });
+              } catch (e: any) {
+                alert("Lỗi: " + (e.message || String(e)));
+              }
+            }}
+            title="Kích hoạt mô phỏng công cụ send_alert của AI Agent để kiểm tra Pop up"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: "12px",
+              padding: "6px 14px",
+              height: "36px",
+              background: "#fef3c7",
+              borderColor: "#fde68a",
+              color: "#92400e",
+              fontWeight: 600,
+            }}
+          >
+            <AlertTriangle size={14} style={{ color: "#d97706" }} />
+            <span>Thử Pop up send_alert</span>
+          </button>
+          <HitlToggleSwitch
+            enabled={hitlEnabled}
+            loading={hitlLoading}
+            onToggle={onToggleHitl}
+            disabled={currentUser?.role !== "admin"}
+          />
+        </div>
       </div>
 
       <Panel>
@@ -1410,6 +1462,215 @@ function CorridorApprovalModal({
   );
 }
 
+function playAlertChime(level: string = "warning") {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    const norm = (level || "").toLowerCase();
+    if (norm === "critical" || norm === "emergency") {
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(698.46, ctx.currentTime + 0.15);
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.55);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.55);
+    } else {
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+    }
+  } catch {
+    // Không chặn ứng dụng nếu trình duyệt giới hạn autoplay
+  }
+}
+
+function AlertPopupModal({
+  alert,
+  onClose,
+  onApprove,
+  onReject,
+  onViewRoom,
+  hitlEnabled,
+  currentUser,
+  actionLoading,
+}: {
+  alert: AlertPopupData;
+  onClose: () => void;
+  onApprove?: (id: string) => Promise<void>;
+  onReject?: (id: string) => Promise<void>;
+  onViewRoom?: (roomId: string) => void;
+  hitlEnabled: boolean;
+  currentUser: UserProfile | null;
+  actionLoading?: boolean;
+}) {
+  const normLevel = (alert.level || "warning").toLowerCase();
+  const isCritical = normLevel === "critical" || normLevel === "emergency";
+  const isWarning = normLevel === "warning";
+  const levelClass = isCritical ? "critical" : isWarning ? "warning" : "info";
+
+  const isPending = alert.status === "pending";
+  const isStudent = currentUser?.role === "student";
+
+  return (
+    <div className="alert-modal-backdrop" onClick={onClose}>
+      <div className="alert-modal-box" onClick={(e) => e.stopPropagation()}>
+        <div className={`alert-modal-header ${levelClass}`}>
+          <div>
+            <div className="alert-modal-badge">
+              <span
+                className="pulse-badge"
+                style={{ backgroundColor: isCritical ? "#ffffff" : isWarning ? "#ffffff" : "#bfdbfe" }}
+              />
+              AI AGENT TOOL · SEND_ALERT
+            </div>
+            <h2 className="alert-modal-title">
+              {isCritical
+                ? "CẢNH BÁO KHẨN CẤP (CRITICAL ALERT)"
+                : isWarning
+                ? "CẢNH BÁO AN NINH / AN TOÀN (WARNING)"
+                : "THÔNG BÁO TỪ HỆ THỐNG (INFO)"}
+            </h2>
+            <div style={{ fontSize: "11px", opacity: 0.9, marginTop: "4px" }}>
+              Mã sự kiện: {alert.event_id || alert.id.slice(0, 10)}
+            </div>
+          </div>
+          <button className="alert-modal-close" onClick={onClose} title="Đóng thông báo">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="alert-modal-body">
+          <div className={`alert-message-card ${levelClass}`}>
+            <div style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
+              {isCritical ? (
+                <ShieldAlert size={22} style={{ flexShrink: 0, marginTop: 2, color: "#dc2626" }} />
+              ) : isWarning ? (
+                <AlertTriangle size={22} style={{ flexShrink: 0, marginTop: 2, color: "#d97706" }} />
+              ) : (
+                <AlertCircle size={22} style={{ flexShrink: 0, marginTop: 2, color: "#2563eb" }} />
+              )}
+              <div style={{ flex: 1, fontSize: "14px", lineHeight: 1.55 }}>{alert.message}</div>
+            </div>
+          </div>
+
+          <div className="alert-meta-grid">
+            <div className="alert-meta-item">
+              <span className="alert-meta-label">Vị trí / Khu vực</span>
+              <span className="alert-meta-val">
+                {alert.room_name || (alert.room_id ? `Phòng ${alert.room_id.slice(0, 8)}` : "Toàn khuôn viên")}
+              </span>
+            </div>
+            <div className="alert-meta-item">
+              <span className="alert-meta-label">Mức độ cảnh báo</span>
+              <span
+                className="alert-meta-val"
+                style={{
+                  textTransform: "uppercase",
+                  color: isCritical ? "#dc2626" : isWarning ? "#d97706" : "#2563eb",
+                }}
+              >
+                ● {normLevel}
+              </span>
+            </div>
+            <div className="alert-meta-item">
+              <span className="alert-meta-label">Thời điểm phát sinh</span>
+              <span className="alert-meta-val">
+                {alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString("vi-VN") : "Vừa xong"}
+              </span>
+            </div>
+            <div className="alert-meta-item">
+              <span className="alert-meta-label">Trạng thái xử lý</span>
+              <span className="alert-meta-val">
+                {isPending
+                  ? "⏳ Chờ duyệt (HITL)"
+                  : alert.status === "approved"
+                  ? "✅ Đã phê duyệt"
+                  : alert.status === "rejected"
+                  ? "❌ Đã từ chối"
+                  : "⚡ Tự động (Autopilot)"}
+              </span>
+            </div>
+          </div>
+
+          {alert.reason && (
+            <div className="alert-reason-box">
+              <strong style={{ color: "#0f172a", display: "block", marginBottom: "4px" }}>
+                Lý do & Cơ sở lập luận từ AI Agent:
+              </strong>
+              {alert.reason}
+            </div>
+          )}
+        </div>
+
+        <div className="alert-modal-footer">
+          {alert.room_id && onViewRoom && (
+            <button
+              className="outline-button"
+              onClick={() => {
+                onViewRoom(alert.room_id!);
+                onClose();
+              }}
+              style={{ marginRight: "auto" }}
+            >
+              Xem phòng này
+            </button>
+          )}
+
+          {isPending && onApprove && onReject ? (
+            <>
+              <button
+                className="outline-button"
+                onClick={() => onReject(alert.id)}
+                disabled={actionLoading || isStudent}
+              >
+                Bác bỏ
+              </button>
+              <button
+                className="primary-button"
+                onClick={() => onApprove(alert.id)}
+                disabled={actionLoading || isStudent}
+                style={{
+                  background: isCritical ? "#dc2626" : isWarning ? "#d97706" : "#2563eb",
+                  borderColor: isCritical ? "#b91c1c" : isWarning ? "#b45309" : "#1d4ed8",
+                }}
+              >
+                {actionLoading ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
+                Duyệt & Gửi cảnh báo
+              </button>
+            </>
+          ) : (
+            <button
+              className="primary-button"
+              onClick={onClose}
+              style={{
+                background: isCritical ? "#dc2626" : isWarning ? "#d97706" : "#2563eb",
+                borderColor: isCritical ? "#b91c1c" : isWarning ? "#b45309" : "#1d4ed8",
+              }}
+            >
+              Đã tiếp nhận / Xác nhận
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AuditPage() {
   const [tab, setTab] = useState<"Agent Tool Calls" | "Fallback Audit">("Agent Tool Calls");
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
@@ -1831,9 +2092,20 @@ function SettingsPage({
   );
 }
 
-function RoomDrawer({ room, close }: { room: Room; close: () => void }) {
+function RoomDrawer({
+  room,
+  close,
+  onModeChange,
+  isStudent,
+}: {
+  room: Room;
+  close: () => void;
+  onModeChange?: (mode: string) => Promise<void>;
+  isStudent?: boolean;
+}) {
   const [stats, setStats] = useState<RoomTelemetryStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
+  const [modeChanging, setModeChanging] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -1892,7 +2164,59 @@ function RoomDrawer({ room, close }: { room: Room; close: () => void }) {
         </div>
         <div className="drawer-content">
           <div className="detail-block">
-            <h3>Ngữ cảnh phòng</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <h3>Chế độ vận hành FSM</h3>
+              {modeChanging && <Loader2 size={13} className="spin text-blue-600" />}
+            </div>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: 12 }}>
+              {(["SAVING", "SELF_STUDY", "LECTURE", "EXAM", "LOCK", "EMERGENCY"] as const).map((m) => {
+                const active = room.mode === m;
+                return (
+                  <button
+                    key={m}
+                    disabled={modeChanging || active || isStudent}
+                    onClick={async () => {
+                      if (!onModeChange) return;
+                      setModeChanging(true);
+                      try {
+                        await onModeChange(m);
+                      } finally {
+                        setModeChanging(false);
+                      }
+                    }}
+                    style={{
+                      padding: "5px 10px",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                      fontWeight: 600,
+                      cursor: active || isStudent ? "default" : "pointer",
+                      background: active ? (m === "EMERGENCY" ? "#dc2626" : "#2563eb") : "#f8fafc",
+                      color: active ? "#ffffff" : "#334155",
+                      border: "1px solid " + (active ? "transparent" : "#cbd5e1"),
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {m === "SAVING"
+                      ? "TIẾT KIỆM (SAVING)"
+                      : m === "SELF_STUDY"
+                      ? "TỰ HỌC (SELF_STUDY)"
+                      : m === "LECTURE"
+                      ? "GIẢNG DẠY (LECTURE)"
+                      : m === "EXAM"
+                      ? "THI CỬ (EXAM)"
+                      : m === "LOCK"
+                      ? "KHÓA (LOCK)"
+                      : "KHẨN CẤP (EMERGENCY)"}
+                  </button>
+                );
+              })}
+            </div>
+            {isStudent && (
+              <small style={{ color: "#94a3b8", display: "block", marginBottom: 10 }}>
+                * Tài khoản Sinh viên chỉ có quyền xem chế độ, không được đổi FSM.
+              </small>
+            )}
+
             <div className="key-grid">
               <span>Room ID<b>{room.id}</b></span>
               <span>Loại phòng<b>{room.type}</b></span>
@@ -2220,6 +2544,10 @@ export default function App() {
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
   const [cardNotification, setCardNotification] = useState<string | null>(null);
 
+  // AI Agent Alert Popup State (send_alert tool)
+  const [activeAlert, setActiveAlert] = useState<AlertPopupData | null>(null);
+  const [alertActionLoading, setAlertActionLoading] = useState(false);
+
   const refreshCardRequests = async () => {
     setCardLoading(true);
     try {
@@ -2354,6 +2682,30 @@ export default function App() {
         setWsConnected(Boolean(msg.connected));
       } else if (msg.type === "hitl_status_changed" || msg.type === "hitl_status") {
         setHitlEnabled(Boolean(msg.hitl_enabled));
+      } else if (msg.type === "system_alert") {
+        // Sự kiện gửi trực tiếp từ tool send_alert (AI Agent hoặc Backend)
+        const a = msg.alert || msg.data || msg;
+        const alertId = String(a.id || a.recommendation_id || a.rec_id || Date.now());
+        const targetRoom = rooms.find((r) => r.id === a.room_id);
+        const popupData: AlertPopupData = {
+          id: alertId,
+          recommendation_id: a.recommendation_id || alertId,
+          event_id: a.event_id,
+          room_id: a.room_id,
+          room_name: a.room_name || targetRoom?.name || (a.room_id ? `Phòng ${String(a.room_id).slice(0, 8)}` : undefined),
+          tool_name: "send_alert",
+          message: a.message || a.reason || "Cảnh báo hệ thống từ AI Agent",
+          level: (a.level || "warning").toLowerCase(),
+          reason: a.reason,
+          confidence: a.confidence,
+          urgency: a.urgency,
+          status: a.status || "pending",
+          timestamp: a.timestamp || new Date().toISOString(),
+          is_auto: a.is_auto,
+          operator: a.operator,
+        };
+        setActiveAlert(popupData);
+        playAlertChime(popupData.level);
       } else if (
         msg.type === "card_registration_request" ||
         msg.type === "card_registration_approved" ||
@@ -2369,12 +2721,13 @@ export default function App() {
       } else if (msg.type === "ai_recommendation" || msg.type === "recommendation_created") {
         const raw = msg.recommendation || msg.data || msg;
         const recId = raw.id || raw.recommendation_id || raw.rec_id || msg.recommendation_id || msg.id;
+        const toolName = raw.tool_name || msg.tool_name;
         if (recId) {
           const item: RecommendationItem = {
             id: String(recId),
             event_id: raw.event_id || msg.event_id,
             room_id: raw.room_id || msg.room_id,
-            tool_name: raw.tool_name || msg.tool_name || "send_alert",
+            tool_name: toolName || "send_alert",
             tool_params: raw.tool_params || msg.tool_params || {},
             reason: raw.reason || msg.reason,
             confidence: raw.confidence ?? msg.confidence ?? 0.95,
@@ -2383,22 +2736,156 @@ export default function App() {
             created_at: raw.created_at || msg.created_at || new Date().toISOString(),
           };
           setRecommendations((prev) => [item, ...prev.filter((r) => r.id !== item.id)]);
+
+          // Nếu tool được AI đề xuất là send_alert -> tự động hiển thị Pop up!
+          const normTool = String(item.tool_name || "").toLowerCase().trim();
+          if (normTool === "send_alert") {
+            const targetRoom = rooms.find((r) => r.id === item.room_id);
+            const alertMsg = item.tool_params?.message || item.reason || "Cảnh báo an ninh / an toàn từ AI Agent";
+            const alertLevel = item.tool_params?.level || (item.urgency === "high" || item.urgency === "critical" ? "critical" : "warning");
+            const popupData: AlertPopupData = {
+              id: item.id,
+              recommendation_id: item.id,
+              event_id: item.event_id,
+              room_id: item.room_id,
+              room_name: targetRoom?.name || (item.room_id ? `Phòng ${item.room_id.slice(0, 8)}` : undefined),
+              tool_name: "send_alert",
+              message: alertMsg,
+              level: String(alertLevel).toLowerCase(),
+              reason: item.reason,
+              confidence: item.confidence,
+              urgency: item.urgency,
+              status: item.status,
+              timestamp: item.created_at,
+            };
+            setActiveAlert(popupData);
+            playAlertChime(popupData.level);
+          }
         }
         getRecentEvents(10).then(setRecentEvents).catch(() => {});
       } else if (msg.type === "recommendation_executed" || msg.type === "tool_execution_dispatched") {
         const recId = msg.recommendation_id || msg.id || msg.data?.id;
         const newStatus = msg.status || (msg.is_auto ? "auto_approved" : "approved");
+        const normTool = String(msg.tool_name || msg.data?.tool_name || "").toLowerCase().trim();
+
         if (recId) {
           setRecommendations((prev) =>
             prev.map((r) => (r.id === recId ? { ...r, status: newStatus } : r))
           );
         }
+
+        // Cập nhật hoặc mở Pop up nếu lệnh là send_alert
+        if (normTool === "send_alert") {
+          setActiveAlert((prev) => {
+            if (prev && (prev.id === recId || prev.recommendation_id === recId)) {
+              return { ...prev, status: newStatus };
+            }
+            const targetRoom = rooms.find((r) => r.id === msg.room_id);
+            return {
+              id: String(recId || Date.now()),
+              recommendation_id: String(recId || ""),
+              room_id: msg.room_id,
+              room_name: targetRoom?.name || (msg.room_id ? `Phòng ${msg.room_id.slice(0, 8)}` : undefined),
+              tool_name: "send_alert",
+              message: msg.tool_params?.message || msg.reason || "Cảnh báo hệ thống đã được gửi",
+              level: (msg.tool_params?.level || "warning").toLowerCase(),
+              reason: msg.reason,
+              status: newStatus,
+              timestamp: new Date().toISOString(),
+              is_auto: msg.is_auto,
+              operator: msg.operator,
+            };
+          });
+          playAlertChime((msg.tool_params?.level || "warning").toLowerCase());
+        } else if (recId && activeAlert && (activeAlert.id === recId || activeAlert.recommendation_id === recId)) {
+          setActiveAlert((prev) => (prev ? { ...prev, status: newStatus } : null));
+        }
         getRecentEvents(10).then(setRecentEvents).catch(() => {});
       } else if (
         msg.type === "room_telemetry" ||
         msg.type === "room_mode_changed" ||
-        msg.type === "fsm_transition"
+        msg.type === "room_state_change" ||
+        msg.type === "fsm_transition" ||
+        msg.type === "telemetry_environment" ||
+        msg.type === "telemetry_occupancy" ||
+        msg.type === "room_command"
       ) {
+        // Cập nhật tức thời bộ nhớ (Instant in-memory sync < 10ms)
+        const targetRoomId = msg.room_id || msg.data?.room_id;
+        const innerData = msg.data || {};
+        const rawMode = msg.mode || msg.room_mode || msg.current_mode || innerData.room_mode || innerData.mode || innerData.current_mode || innerData.state || (innerData.command_type === "mode" ? innerData.command_value : undefined);
+        const normMode = rawMode ? String(rawMode).trim().toUpperCase().replace("-", "_") : undefined;
+
+        if (targetRoomId) {
+          setRooms((prev) =>
+            prev.map((r) => {
+              if (r.id !== targetRoomId) return r;
+              const updated = { ...r };
+              if (normMode) updated.mode = normMode;
+              if (innerData.temperature !== undefined && innerData.temperature !== null) {
+                updated.temp = `${innerData.temperature}°C`;
+              }
+              if (innerData.humidity !== undefined && innerData.humidity !== null) {
+                updated.humidity = `${innerData.humidity}%`;
+              }
+              if (innerData.co2 !== undefined && innerData.co2 !== null) {
+                updated.co2 = `${innerData.co2} ppm`;
+              }
+              if (innerData.smoke !== undefined) {
+                updated.smoke = String(innerData.smoke);
+              }
+              if (innerData.occupancy !== undefined && innerData.occupancy !== null) {
+                updated.occupancy = Number(innerData.occupancy);
+              } else if (innerData.count !== undefined && innerData.count !== null) {
+                updated.occupancy = Number(innerData.count);
+              }
+              if (innerData.fan_on !== undefined) {
+                updated.fan_on = Boolean(innerData.fan_on);
+              } else if (innerData.command_type === "fan") {
+                updated.fan_on = ["on", "1", "true", "high"].includes(String(innerData.command_value).toLowerCase());
+              }
+              if (innerData.door_locked !== undefined) {
+                updated.door_locked = Boolean(innerData.door_locked);
+              } else if (innerData.command_type === "door") {
+                updated.door_locked = String(innerData.command_value).toLowerCase() === "locked";
+              }
+              return updated;
+            })
+          );
+
+          setSelectedRoom((prev) => {
+            if (!prev || prev.id !== targetRoomId) return prev;
+            const updated = { ...prev };
+            if (normMode) updated.mode = normMode;
+            if (innerData.temperature !== undefined && innerData.temperature !== null) {
+              updated.temp = `${innerData.temperature}°C`;
+            }
+            if (innerData.humidity !== undefined && innerData.humidity !== null) {
+              updated.humidity = `${innerData.humidity}%`;
+            }
+            if (innerData.co2 !== undefined && innerData.co2 !== null) {
+              updated.co2 = `${innerData.co2} ppm`;
+            }
+            if (innerData.occupancy !== undefined && innerData.occupancy !== null) {
+              updated.occupancy = Number(innerData.occupancy);
+            } else if (innerData.count !== undefined && innerData.count !== null) {
+              updated.occupancy = Number(innerData.count);
+            }
+            if (innerData.fan_on !== undefined) {
+              updated.fan_on = Boolean(innerData.fan_on);
+            } else if (innerData.command_type === "fan") {
+              updated.fan_on = ["on", "1", "true", "high"].includes(String(innerData.command_value).toLowerCase());
+            }
+            if (innerData.door_locked !== undefined) {
+              updated.door_locked = Boolean(innerData.door_locked);
+            } else if (innerData.command_type === "door") {
+              updated.door_locked = String(innerData.command_value).toLowerCase() === "locked";
+            }
+            return updated;
+          });
+        }
+
+        // Tải lại toàn bộ từ REST API để đồng bộ dữ liệu chuẩn
         getRooms()
           .then((roomList) => {
             if (roomList.length > 0) {
@@ -2418,6 +2905,25 @@ export default function App() {
                   door_locked: r.door_locked,
                 }))
               );
+              if (targetRoomId) {
+                const refreshed = roomList.find((r) => r.id === targetRoomId);
+                if (refreshed) {
+                  setSelectedRoom((prev) =>
+                    prev && prev.id === targetRoomId
+                      ? {
+                          ...prev,
+                          mode: refreshed.mode,
+                          temp: refreshed.temperature !== null ? `${refreshed.temperature}°C` : prev.temp,
+                          humidity: refreshed.humidity !== null ? `${refreshed.humidity}%` : prev.humidity,
+                          co2: refreshed.co2 !== null ? `${refreshed.co2} ppm` : prev.co2,
+                          occupancy: refreshed.occupancy ?? prev.occupancy,
+                          fan_on: refreshed.fan_on,
+                          door_locked: refreshed.door_locked,
+                        }
+                      : prev
+                  );
+                }
+              }
             }
           })
           .catch(() => {});
@@ -2460,6 +2966,46 @@ export default function App() {
       )
     );
     return result;
+  };
+
+  // Xử lý phê duyệt trực tiếp từ Pop up Cảnh báo send_alert
+  const handleAlertApprove = async (id: string) => {
+    setAlertActionLoading(true);
+    try {
+      await handleExecuteRec(id, "approve", `Approved via Alert Popup by ${currentUser?.username || "operator"}`);
+      setActiveAlert((prev) => (prev ? { ...prev, status: "approved" } : null));
+    } catch (err: any) {
+      alert("Lỗi khi phê duyệt cảnh báo: " + (err.message || String(err)));
+    } finally {
+      setAlertActionLoading(false);
+    }
+  };
+
+  const handleAlertReject = async (id: string) => {
+    setAlertActionLoading(true);
+    try {
+      await handleExecuteRec(id, "reject", `Rejected via Alert Popup by ${currentUser?.username || "operator"}`);
+      setActiveAlert(null);
+    } catch (err: any) {
+      alert("Lỗi khi từ chối cảnh báo: " + (err.message || String(err)));
+    } finally {
+      setAlertActionLoading(false);
+    }
+  };
+
+  // Xử lý chuyển đổi chế độ FSM của phòng
+  const handleModeChange = async (newMode: string) => {
+    if (!selectedRoom) return;
+    try {
+      await updateRoomState(selectedRoom.id, newMode);
+      setSelectedRoom((prev) => (prev ? { ...prev, mode: newMode } : null));
+      setRooms((prev) =>
+        prev.map((r) => (r.id === selectedRoom.id ? { ...r, mode: newMode } : r))
+      );
+    } catch (err: any) {
+      console.error("Lỗi cập nhật chế độ phòng:", err);
+      alert("Lỗi khi chuyển chế độ phòng: " + (err.message || String(err)));
+    }
   };
 
   const handleOpenDecision = (rec?: RecommendationItem) => {
@@ -2688,7 +3234,14 @@ export default function App() {
         </main>
       </div>
 
-      {selectedRoom && <RoomDrawer room={selectedRoom} close={() => setSelectedRoom(null)} />}
+      {selectedRoom && (
+        <RoomDrawer
+          room={selectedRoom}
+          close={() => setSelectedRoom(null)}
+          onModeChange={handleModeChange}
+          isStudent={currentUser?.role === "student"}
+        />
+      )}
       {decisionOpen && (
         <DecisionDrawer
           recommendation={selectedRec}
@@ -2705,6 +3258,24 @@ export default function App() {
           onClose={() => setSelectedCardForApproval(null)}
           onConfirm={handleApproveCard}
           submitting={approvalSubmitting}
+        />
+      )}
+
+      {activeAlert && (
+        <AlertPopupModal
+          alert={activeAlert}
+          onClose={() => setActiveAlert(null)}
+          onApprove={handleAlertApprove}
+          onReject={handleAlertReject}
+          onViewRoom={(roomId) => {
+            const rm = rooms.find((r) => r.id === roomId);
+            if (rm) {
+              setSelectedRoom(rm);
+            }
+          }}
+          hitlEnabled={hitlEnabled}
+          currentUser={currentUser}
+          actionLoading={alertActionLoading}
         />
       )}
 
