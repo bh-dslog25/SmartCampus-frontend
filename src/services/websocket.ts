@@ -67,6 +67,13 @@ class CampusWebSocketClient {
 
   public subscribe(handler: WebSocketMessageHandler): () => void {
     this.handlers.add(handler);
+    if (this.isConnected) {
+      try {
+        handler({ type: "connection_status", connected: true });
+      } catch (err) {
+        console.error("Lỗi trong WebSocket event handler:", err);
+      }
+    }
     return () => {
       this.handlers.delete(handler);
     };

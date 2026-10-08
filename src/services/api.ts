@@ -220,6 +220,32 @@ export async function updateRoomState(roomId: string, mode: string): Promise<Roo
   return await res.json();
 }
 
+export async function toggleRoomFan(roomId: string, fanOn: boolean): Promise<{ fan_on: boolean; message: string }> {
+  const res = await authFetch(`/api/rooms/${roomId}/fan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fan_on: fanOn }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Điều khiển quạt thất bại: ${errText}`);
+  }
+  return await res.json();
+}
+
+export async function toggleRoomDoor(roomId: string, doorLocked: boolean): Promise<{ door_locked: boolean; message: string }> {
+  const res = await authFetch(`/api/rooms/${roomId}/door`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ door_locked: doorLocked }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Điều khiển khóa cửa thất bại: ${errText}`);
+  }
+  return await res.json();
+}
+
 // ---------------------------------------------------------------------------
 // Recommendations & HITL APIs
 // ---------------------------------------------------------------------------
@@ -256,6 +282,31 @@ export async function executeRecommendation(
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`Execute failed (${res.status}): ${errText}`);
+  }
+  return await res.json();
+}
+
+export async function directExecuteTool(
+  toolName: string,
+  roomId?: string,
+  toolParams?: Record<string, any>,
+  action: "approve" | "reject" = "approve",
+  reason?: string
+): Promise<any> {
+  const res = await authFetch(`/api/recommendations/direct-execute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tool_name: toolName,
+      room_id: roomId,
+      tool_params: toolParams || {},
+      action,
+      reason: reason || `Direct execution from AI Assistant UI`,
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Direct execute failed (${res.status}): ${errText}`);
   }
   return await res.json();
 }
@@ -303,7 +354,14 @@ export async function getDevices(): Promise<DeviceItem[]> {
 // ---------------------------------------------------------------------------
 // Chat / AI Assistant Query
 // ---------------------------------------------------------------------------
-export async function askAiAssistant(question: string, roomId?: string): Promise<string> {
+export interface AiChatResult {
+  reply: string;
+  suggested_action?: string;
+  suggested_params?: Record<string, any>;
+  evidence?: string[];
+}
+
+export async function askAiAssistant(question: string, roomId?: string): Promise<AiChatResult> {
   const res = await authFetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -314,7 +372,12 @@ export async function askAiAssistant(question: string, roomId?: string): Promise
     throw new Error(errData.detail || `Lỗi AI Service: HTTP ${res.status}`);
   }
   const data = await res.json();
-  return data.reply || data.response || "Đã nhận câu trả lời từ AI Agent.";
+  return {
+    reply: data.reply || data.response || "Đã nhận câu trả lời từ AI Agent.",
+    suggested_action: data.suggested_action,
+    suggested_params: data.suggested_params || {},
+    evidence: data.evidence || [],
+  };
 }
 
 // ---------------------------------------------------------------------------

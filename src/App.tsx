@@ -52,6 +52,7 @@ import {
   getRooms,
   getRecommendations,
   executeRecommendation,
+  directExecuteTool,
   getHitlStatus,
   toggleHitl,
   getDevices,
@@ -60,8 +61,9 @@ import {
   approveCardRegistration,
   rejectCardRegistration,
   simulateCorridorCardScan,
-  simulateAlert,
   updateRoomState,
+  toggleRoomFan,
+  toggleRoomDoor,
   type CardRegistrationRequestItem,
   askAiAssistant,
   login,
@@ -1777,9 +1779,26 @@ function AuditPage() {
   );
 }
 
-function AssistantPage({ openDecision, rooms }: { openDecision: () => void; rooms: Room[] }) {
+function AssistantPage({
+  openDecision,
+  rooms,
+  recommendations,
+  hitlEnabled,
+}: {
+  openDecision: (rec?: RecommendationItem | string) => void;
+  rooms: Room[];
+  recommendations?: RecommendationItem[];
+  hitlEnabled: boolean;
+}) {
   const [selectedRoomId, setSelectedRoomId] = useState<string>(rooms[0]?.id || "");
-  const [messages, setMessages] = useState<Array<{ role: "user" | "ai"; text: string; rec?: string }>>([
+  const [messages, setMessages] = useState<Array<{
+    role: "user" | "ai";
+    text: string;
+    rec?: string;
+    recParams?: Record<string, any>;
+    autoExecuted?: boolean;
+    execMessage?: string;
+  }>>([
     {
       role: "ai",
       text: "Xin chào! Tôi là Trợ lý AI SmartCampus. Tôi đã kết nối với cơ sở tri thức RAG và dữ liệu telemetry thời gian thực từ Edge Gateway. Bạn có thể hỏi tôi về trạng thái phòng học, chỉ số cảm biến, quy trình SOP hoặc yêu cầu hỗ trợ vận hành an toàn.",
@@ -1799,14 +1818,85 @@ function AssistantPage({ openDecision, rooms }: { openDecision: () => void; room
     setLoading(true);
 
     try {
-      const reply = await askAiAssistant(query, selectedRoomId || undefined);
-      let rec: string | undefined = undefined;
-      if (reply.includes("trigger_buzzer")) rec = "trigger_buzzer";
-      else if (reply.includes("set_fan")) rec = "set_fan";
-      else if (reply.includes("set_door")) rec = "set_door";
-      else if (reply.includes("send_alert")) rec = "send_alert";
+      const resData = await askAiAssistant(query, selectedRoomId || undefined);
+      const reply = resData.reply;
+      let rec: string | undefined = resData.suggested_action;
+      let recParams: Record<string, any> = resData.suggested_params || {};
 
-      setMessages((prev) => [...prev, { role: "ai", text: reply, rec }]);
+      // 1. Phân tích nếu mô hình LLM trả về cấu trúc JSON trong text
+      if (!rec) {
+        try {
+          const jsonMatch = reply.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.action || parsed.tool_name) {
+              rec = parsed.action || parsed.tool_name;
+              recParams = { ...parsed };
+              delete (recParams as any).action;
+              delete (recParams as any).tool_name;
+            }
+          }
+        } catch {}
+      }
+
+      // 2. Phân tích tự nhiên dựa trên từ khóa nếu chưa có
+      if (!rec) {
+        const lowerReply = reply.toLowerCase();
+        const lowerQuery = query.toLowerCase();
+
+        if (reply.includes("trigger_buzzer")) {
+          rec = "trigger_buzzer";
+          recParams = { pattern: "short" };
+        } else if (reply.includes("set_fan") || lowerQuery.includes("quạt")) {
+          rec = "set_fan";
+          const isOff = lowerQuery.includes("tắt") || lowerQuery.includes("dừng") || lowerQuery.includes("ngừng");
+          recParams = { state: isOff ? "off" : "on" };
+        } else if (reply.includes("set_door") || lowerQuery.includes("cửa")) {
+          rec = "set_door";
+          const isLocked = lowerQuery.includes("khóa") || lowerQuery.includes("đóng");
+          recParams = { state: isLocked ? "locked" : "unlocked" };
+        } else if (reply.includes("send_alert")) {
+          rec = "send_alert";
+          recParams = { level: "warning" };
+        }
+      }
+
+      if (recParams.state) {
+        recParams.state = String(recParams.state).toLowerCase();
+      }
+
+      // 3. Tự động thực thi nếu Autopilot đang BẬT (!hitlEnabled)
+      if (rec) {
+        if (!hitlEnabled) {
+          const targetRoomId = recParams.room_id || selectedRoomId || selectedRoom?.id;
+          try {
+            await directExecuteTool(
+              rec,
+              targetRoomId,
+              { room_id: targetRoomId, ...recParams },
+              "approve",
+              `Autopilot tự động thực thi từ yêu cầu: ${query}`
+            );
+            const cmdVal = recParams.state || recParams.pattern || "executed";
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "ai",
+                text: reply,
+                rec,
+                recParams,
+                autoExecuted: true,
+                execMessage: `⚡ [AUTOPILOT ĐÃ TỰ ĐỘNG THỰC THI]: Lệnh '${rec}: ${cmdVal}' đã được tự động duyệt và phát xuống Edge Gateway & MQTT thành công!`,
+              },
+            ]);
+            return;
+          } catch (err: any) {
+            console.error("Lỗi Autopilot auto execute:", err);
+          }
+        }
+      }
+
+      setMessages((prev) => [...prev, { role: "ai", text: reply, rec, recParams, autoExecuted: false }]);
     } catch (e: any) {
       setMessages((prev) => [
         ...prev,
@@ -1840,15 +1930,44 @@ function AssistantPage({ openDecision, rooms }: { openDecision: () => void; room
               )}
               <p>{m.text}</p>
               {m.rec && (
-                <div className="assistant-recommend">
-                  <Zap size={18} />
+                <div
+                  className="assistant-recommend"
+                  style={
+                    m.autoExecuted
+                      ? { borderColor: "#10b981", background: "rgba(16, 185, 129, 0.1)" }
+                      : undefined
+                  }
+                >
+                  {m.autoExecuted ? <CheckCircle2 size={18} color="#10b981" /> : <Zap size={18} />}
                   <div>
-                    <span>KHUYẾN NGHỊ · HIGH</span>
-                    <strong>{m.rec}</strong>
+                    <span style={{ color: m.autoExecuted ? "#10b981" : undefined }}>
+                      {m.autoExecuted ? "AUTOPILOT · ĐÃ TỰ ĐỘNG THỰC THI" : "KHUYẾN NGHỊ · CHỜ DUYỆT (HITL)"}
+                    </span>
+                    <strong>{m.rec} {m.recParams?.state ? `(${m.recParams.state.toUpperCase()})` : ""}</strong>
+                    {m.execMessage && (
+                      <p style={{ margin: "3px 0 0", fontSize: 11, color: "#6ee7b7" }}>{m.execMessage}</p>
+                    )}
                   </div>
-                  <button className="text-button" onClick={openDecision}>
-                    Xem quyết định <ChevronRight size={15} />
-                  </button>
+                  {!m.autoExecuted && (
+                    <button
+                      className="text-button"
+                      onClick={() =>
+                        openDecision({
+                          id: `rec-${Date.now()}`,
+                          room_id: m.recParams?.room_id || selectedRoomId || selectedRoom?.id,
+                          tool_name: m.rec!,
+                          tool_params: { room_id: m.recParams?.room_id || selectedRoomId || selectedRoom?.id, ...(m.recParams || {}) },
+                          reason: m.text.slice(0, 150) + "...",
+                          confidence: 0.95,
+                          urgency: "HIGH",
+                          status: "pending",
+                          created_at: new Date().toISOString(),
+                        })
+                      }
+                    >
+                      Xem quyết định <ChevronRight size={15} />
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -2096,16 +2215,22 @@ function RoomDrawer({
   room,
   close,
   onModeChange,
+  onToggleFan,
+  onToggleDoor,
   isStudent,
 }: {
   room: Room;
   close: () => void;
   onModeChange?: (mode: string) => Promise<void>;
+  onToggleFan?: (fanOn: boolean) => Promise<void>;
+  onToggleDoor?: (doorLocked: boolean) => Promise<void>;
   isStudent?: boolean;
 }) {
   const [stats, setStats] = useState<RoomTelemetryStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
   const [modeChanging, setModeChanging] = useState(false);
+  const [togglingFan, setTogglingFan] = useState(false);
+  const [togglingDoor, setTogglingDoor] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -2139,9 +2264,9 @@ function RoomDrawer({
   const maxSmoke = stats?.smoke ? `${stats.smoke.max}` : "-";
   const avgSmoke = stats?.smoke ? `${stats.smoke.avg}` : "-";
 
-  const totalIn = stats?.occupancy ? stats.occupancy.total_in : room.occupancy;
-  const totalOut = stats?.occupancy ? stats.occupancy.total_out : 0;
-  const currentOcc = stats?.occupancy ? stats.occupancy.current : room.occupancy;
+  const currentOcc = room.occupancy ?? stats?.occupancy?.current ?? 0;
+  const totalIn = Math.max(stats?.occupancy?.total_in ?? 0, currentOcc);
+  const totalOut = stats?.occupancy?.total_out ?? Math.max(0, totalIn - currentOcc);
 
   const fsmHistory = stats?.fsm_history && stats.fsm_history.length > 0
     ? stats.fsm_history
@@ -2243,10 +2368,82 @@ function RoomDrawer({
             </div>
           </div>
           <div className="detail-block">
-            <h3>Cơ cấu chấp hành vật lý</h3>
-            <div className="key-grid">
-              <span>Quạt thông gió<b>{room.fan_on ? "ĐANG BẬT" : "ĐANG TẮT"}</b></span>
-              <span>Khóa cửa điện từ<b>{room.door_locked ? "ĐÃ KHÓA" : "MỞ KHÓA"}</b></span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <h3>Cơ cấu chấp hành vật lý</h3>
+              {(togglingFan || togglingDoor) && <Loader2 size={13} className="spin text-blue-600" />}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}>
+                <div>
+                  <span style={{ fontSize: "12px", color: "#94a3b8", display: "block" }}>Quạt thông gió phòng</span>
+                  <b style={{ color: room.fan_on ? "#10b981" : "#94a3b8", fontSize: "14px" }}>
+                    {room.fan_on ? "● ĐANG BẬT" : "○ ĐANG TẮT"}
+                  </b>
+                </div>
+                {onToggleFan && (
+                  <button
+                    disabled={togglingFan || isStudent}
+                    onClick={async () => {
+                      setTogglingFan(true);
+                      try {
+                        await onToggleFan(!room.fan_on);
+                      } finally {
+                        setTogglingFan(false);
+                      }
+                    }}
+                    style={{
+                      padding: "7px 14px",
+                      borderRadius: "6px",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      cursor: isStudent ? "default" : "pointer",
+                      background: room.fan_on ? "#dc2626" : "#16a34a",
+                      color: "#ffffff",
+                      border: "none",
+                      boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {togglingFan ? "Đang gửi lệnh..." : room.fan_on ? "TẮT QUẠT" : "BẬT QUẠT"}
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}>
+                <div>
+                  <span style={{ fontSize: "12px", color: "#94a3b8", display: "block" }}>Khóa cửa điện từ</span>
+                  <b style={{ color: room.door_locked ? "#ef4444" : "#10b981", fontSize: "14px" }}>
+                    {room.door_locked ? "🔒 ĐÃ KHÓA" : "🔓 MỞ KHÓA"}
+                  </b>
+                </div>
+                {onToggleDoor && (
+                  <button
+                    disabled={togglingDoor || isStudent}
+                    onClick={async () => {
+                      setTogglingDoor(true);
+                      try {
+                        await onToggleDoor(!room.door_locked);
+                      } finally {
+                        setTogglingDoor(false);
+                      }
+                    }}
+                    style={{
+                      padding: "7px 14px",
+                      borderRadius: "6px",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      cursor: isStudent ? "default" : "pointer",
+                      background: room.door_locked ? "#16a34a" : "#dc2626",
+                      color: "#ffffff",
+                      border: "none",
+                      boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {togglingDoor ? "Đang gửi lệnh..." : room.door_locked ? "MỞ CỬA" : "KHÓA CỬA"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
           <div className="detail-block">
@@ -2256,8 +2453,20 @@ function RoomDrawer({
               <div><strong>{currentOcc}</strong><span>Hiện tại</span></div>
               <div><strong>{totalIn}</strong><span>Tổng vào</span></div>
               <div><strong>{totalOut}</strong><span>Tổng ra</span></div>
-              <Badge tone={room.mode === "SAVING" ? "secondary" : "info"}>
-                {room.mode === "SAVING" ? "Phòng trống" : room.mode === "EXAM" ? "Thi cử" : "Đang học"}
+              <Badge tone={room.mode === "SAVING" ? "secondary" : room.mode === "EMERGENCY" ? "danger" : room.mode === "SUSPECTED" ? "warning" : "info"}>
+                {room.mode === "SAVING"
+                  ? "Phòng trống"
+                  : room.mode === "SELF_STUDY"
+                  ? "Tự học"
+                  : room.mode === "LECTURE"
+                  ? "Giảng dạy"
+                  : room.mode === "EXAM"
+                  ? "Thi cử"
+                  : room.mode === "LOCK"
+                  ? "Khóa an ninh"
+                  : room.mode === "SUSPECTED"
+                  ? "Nghi vấn"
+                  : "Khẩn cấp"}
               </Badge>
             </div>
           </div>
@@ -2451,12 +2660,14 @@ function DecisionDrawer({
               <code>room_id</code>
               <b>{rec.room_id || rec.tool_params?.room_id || "LAB-02"}</b>
             </div>
-            {Object.entries(rec.tool_params || {}).map(([k, v]) => (
-              <div className="code-row" key={k}>
-                <code>{k}</code>
-                <b>{String(v)}</b>
-              </div>
-            ))}
+            {Object.entries(rec.tool_params || {})
+              .filter(([k]) => k !== "room_id")
+              .map(([k, v]) => (
+                <div className="code-row" key={k}>
+                  <code>{k}</code>
+                  <b>{String(v)}</b>
+                </div>
+              ))}
           </div>
 
           <div className="detail-block">
@@ -2529,7 +2740,7 @@ export default function App() {
   const [decisionOpen, setDecisionOpen] = useState(false);
   const [hitlEnabled, setHitlEnabled] = useState(true);
   const [hitlLoading, setHitlLoading] = useState(false);
-  const [wsConnected, setWsConnected] = useState(false);
+  const [wsConnected, setWsConnected] = useState(() => campusWs.getStatus());
 
   // RBAC & Auth State
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(getStoredUser());
@@ -2680,6 +2891,8 @@ export default function App() {
 
       if (msg.type === "connection_status") {
         setWsConnected(Boolean(msg.connected));
+      } else if (msg.type === "connected") {
+        setWsConnected(true);
       } else if (msg.type === "hitl_status_changed" || msg.type === "hitl_status") {
         setHitlEnabled(Boolean(msg.hitl_enabled));
       } else if (msg.type === "system_alert") {
@@ -2836,8 +3049,14 @@ export default function App() {
               }
               if (innerData.occupancy !== undefined && innerData.occupancy !== null) {
                 updated.occupancy = Number(innerData.occupancy);
+              } else if (innerData.occupancy_count !== undefined && innerData.occupancy_count !== null) {
+                updated.occupancy = Number(innerData.occupancy_count);
               } else if (innerData.count !== undefined && innerData.count !== null) {
                 updated.occupancy = Number(innerData.count);
+              } else if (innerData.occupancy_type === "IN") {
+                updated.occupancy = (updated.occupancy || 0) + 1;
+              } else if (innerData.occupancy_type === "OUT") {
+                updated.occupancy = Math.max(0, (updated.occupancy || 0) - 1);
               }
               if (innerData.fan_on !== undefined) {
                 updated.fan_on = Boolean(innerData.fan_on);
@@ -2868,8 +3087,14 @@ export default function App() {
             }
             if (innerData.occupancy !== undefined && innerData.occupancy !== null) {
               updated.occupancy = Number(innerData.occupancy);
+            } else if (innerData.occupancy_count !== undefined && innerData.occupancy_count !== null) {
+              updated.occupancy = Number(innerData.occupancy_count);
             } else if (innerData.count !== undefined && innerData.count !== null) {
               updated.occupancy = Number(innerData.count);
+            } else if (innerData.occupancy_type === "IN") {
+              updated.occupancy = (updated.occupancy || 0) + 1;
+            } else if (innerData.occupancy_type === "OUT") {
+              updated.occupancy = Math.max(0, (updated.occupancy || 0) - 1);
             }
             if (innerData.fan_on !== undefined) {
               updated.fan_on = Boolean(innerData.fan_on);
@@ -2931,8 +3156,40 @@ export default function App() {
       }
     });
 
+    // 3. Fallback sync polling mỗi 6s để tự động cập nhật nếu có thay đổi từ Edge/Sensors
+    const syncInterval = setInterval(() => {
+      if (!mounted) return;
+      getRooms().then((roomList) => {
+        if (!mounted || !roomList || roomList.length === 0) return;
+        setRooms((prev) =>
+          roomList.map((r: RoomData) => {
+            const old = prev.find((p) => p.id === r.id);
+            return {
+              id: r.id,
+              name: r.name,
+              type: r.floor ? `Tầng ${r.floor}` : "Phòng học",
+              mode: r.mode,
+              temp: r.temperature !== null ? `${r.temperature}°C` : old?.temp || "26.5°C",
+              humidity: r.humidity !== null ? `${r.humidity}%` : old?.humidity || "60%",
+              co2: r.co2 !== null ? `${r.co2} ppm` : old?.co2 || "450 ppm",
+              smoke: r.smoke || old?.smoke || "Bình thường",
+              occupancy: r.occupancy ?? old?.occupancy ?? 0,
+              status: r.status,
+              fan_on: r.fan_on,
+              door_locked: r.door_locked,
+            };
+          })
+        );
+      }).catch(() => {});
+
+      getHitlStatus().then((hitl) => mounted && setHitlEnabled(hitl)).catch(() => {});
+      getRecommendations("all").then((recs) => mounted && recs.length > 0 && setRecommendations(recs)).catch(() => {});
+      getDevices().then((devs) => mounted && devs.length > 0 && setDevices(devs)).catch(() => {});
+    }, 6000);
+
     return () => {
       mounted = false;
+      clearInterval(syncInterval);
       unsubscribe();
     };
   }, []);
@@ -2959,6 +3216,18 @@ export default function App() {
 
   // Xử lý phê duyệt/từ chối recommendation
   const handleExecuteRec = async (id: string, action: "approve" | "reject", notes?: string) => {
+    if (id.startsWith("rec-") || !id.includes("-")) {
+      const toolName = selectedRec?.tool_name || "trigger_buzzer";
+      const targetRoomId = selectedRec?.room_id || selectedRoom?.id || rooms[0]?.id;
+      const res = await directExecuteTool(
+        toolName,
+        targetRoomId,
+        selectedRec?.tool_params || { room_id: targetRoomId },
+        action,
+        notes || selectedRec?.reason
+      );
+      return res;
+    }
     const result = await executeRecommendation(id, action, notes);
     setRecommendations((prev) =>
       prev.map((r) =>
@@ -3008,8 +3277,61 @@ export default function App() {
     }
   };
 
-  const handleOpenDecision = (rec?: RecommendationItem) => {
-    const target = rec || recommendations[0];
+  // Xử lý bật/tắt quạt thủ công cho từng phòng
+  const handleToggleFan = async (fanOn: boolean) => {
+    if (!selectedRoom) return;
+    try {
+      await toggleRoomFan(selectedRoom.id, fanOn);
+      setSelectedRoom((prev) => (prev ? { ...prev, fan_on: fanOn } : null));
+      setRooms((prev) =>
+        prev.map((r) => (r.id === selectedRoom.id ? { ...r, fan_on: fanOn } : r))
+      );
+    } catch (err: any) {
+      console.error("Lỗi điều khiển quạt:", err);
+      alert("Lỗi khi điều khiển quạt: " + (err.message || String(err)));
+    }
+  };
+
+  // Xử lý đóng/mở khóa cửa thủ công cho từng phòng
+  const handleToggleDoor = async (doorLocked: boolean) => {
+    if (!selectedRoom) return;
+    try {
+      await toggleRoomDoor(selectedRoom.id, doorLocked);
+      setSelectedRoom((prev) => (prev ? { ...prev, door_locked: doorLocked } : null));
+      setRooms((prev) =>
+        prev.map((r) => (r.id === selectedRoom.id ? { ...r, door_locked: doorLocked } : r))
+      );
+    } catch (err: any) {
+      console.error("Lỗi điều khiển khóa cửa:", err);
+      alert("Lỗi khi điều khiển khóa cửa: " + (err.message || String(err)));
+    }
+  };
+
+  const handleOpenDecision = (rec?: RecommendationItem | string) => {
+    let target: RecommendationItem | undefined;
+    if (typeof rec === "object" && rec !== null) {
+      target = rec;
+    } else if (typeof rec === "string" && rec.trim()) {
+      target = recommendations.find(
+        (r) => r.tool_name === rec || r.id === rec || (r as any).recommendation_id === rec
+      );
+      if (!target) {
+        target = recommendations[0] || {
+          id: `rec-${Date.now()}`,
+          room_id: selectedRoom?.id || rooms[0]?.id,
+          tool_name: rec,
+          tool_params: { room_id: selectedRoom?.id || rooms[0]?.id },
+          reason: `Đề xuất '${rec}' phát sinh từ phân tích của Trợ lý AI SmartCampus.`,
+          confidence: 0.95,
+          urgency: "high",
+          status: "pending",
+          created_at: new Date().toISOString(),
+        };
+      }
+    } else {
+      target = recommendations[0];
+    }
+
     if (!target) {
       alert("Chưa có đề xuất (recommendation) nào từ AI Agent.");
       return;
@@ -3219,7 +3541,12 @@ export default function App() {
           {page === "History & Devices" && <HistoryPage devices={devices} rooms={rooms} />}
           {page === "Audit Logs" && <AuditPage />}
           {page === "AI Assistant" && (
-            <AssistantPage openDecision={() => handleOpenDecision()} rooms={rooms} />
+            <AssistantPage
+              openDecision={handleOpenDecision}
+              rooms={rooms}
+              recommendations={recommendations}
+              hitlEnabled={hitlEnabled}
+            />
           )}
           {page === "Settings" && (
             <SettingsPage
@@ -3236,9 +3563,11 @@ export default function App() {
 
       {selectedRoom && (
         <RoomDrawer
-          room={selectedRoom}
+          room={rooms.find((r) => r.id === selectedRoom.id) || selectedRoom}
           close={() => setSelectedRoom(null)}
           onModeChange={handleModeChange}
+          onToggleFan={handleToggleFan}
+          onToggleDoor={handleToggleDoor}
           isStudent={currentUser?.role === "student"}
         />
       )}
