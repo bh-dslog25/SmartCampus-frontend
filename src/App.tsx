@@ -1861,6 +1861,12 @@ function AssistantPage({
         }
       }
 
+      if (recParams.value && !recParams.state) {
+        recParams.state = recParams.value;
+      }
+      if (recParams.status && !recParams.state) {
+        recParams.state = recParams.status;
+      }
       if (recParams.state) {
         recParams.state = String(recParams.state).toLowerCase();
       }
