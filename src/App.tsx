@@ -868,6 +868,14 @@ function HistoryPage({ devices, rooms }: { devices: DeviceItem[]; rooms: Room[] 
   const [telemetryPoints, setTelemetryPoints] = useState<TelemetryPoint[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
+  // Tự động gán phòng đầu tiên nếu ban đầu rooms rỗng
+  useEffect(() => {
+    if (!selectedRoomId && rooms.length > 0) {
+      setSelectedRoomId(rooms[0].id);
+    }
+  }, [rooms, selectedRoomId]);
+
+  // Tải chuỗi dữ liệu lịch sử từ TimescaleDB khi đổi phòng
   useEffect(() => {
     let active = true;
     setLoadingHistory(true);
@@ -883,10 +891,110 @@ function HistoryPage({ devices, rooms }: { devices: DeviceItem[]; rooms: Room[] 
     };
   }, [selectedRoomId]);
 
-  const metricValues = telemetryPoints.map((p) => p[selectedMetric] || 0);
-  const currentVal = metricValues[metricValues.length - 1] ?? 0;
+  // Lắng nghe bản tin telemetry qua WebSocket realtime (< 10ms) từ MQTT broker
+  useEffect(() => {
+    const unsub = campusWs.subscribe((msg) => {
+      if (
+        msg.type === "telemetry_environment" ||
+        msg.type === "room_telemetry"
+      ) {
+        const targetRoomId = msg.room_id || msg.data?.room_id;
+        const d = msg.data || {};
+
+        // Khớp phòng được chọn (hỗ trợ cả UUID đầy đủ lẫn tiền tố 8 ký tự hoặc toàn trường)
+        const isMatch =
+          !selectedRoomId ||
+          selectedRoomId === targetRoomId ||
+          (Boolean(targetRoomId) &&
+            (selectedRoomId.startsWith(String(targetRoomId)) ||
+              String(targetRoomId).startsWith(selectedRoomId) ||
+              selectedRoomId.replace(/-/g, "").toLowerCase() === String(targetRoomId).replace(/-/g, "").toLowerCase()));
+
+        if (isMatch) {
+          const temp = d.temperature !== undefined && d.temperature !== null ? Number(d.temperature) : undefined;
+          const hum = d.humidity !== undefined && d.humidity !== null ? Number(d.humidity) : undefined;
+          const co2 = d.co2 !== undefined && d.co2 !== null ? Number(d.co2) : undefined;
+          const rawSmoke = d.smoke ?? d.smoke_value ?? (d.smoke_state === "EMERGENCY" ? 350 : (d.smoke_state === "SUSPECTED" ? 150 : 50));
+          const smokeNum = typeof rawSmoke === "number" ? rawSmoke : (parseFloat(rawSmoke) || 0);
+          const aqi = d.air_quality !== undefined && d.air_quality !== null ? Number(d.air_quality) : 50;
+
+          const now = new Date();
+          const timeLabel = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+
+          setTelemetryPoints((prev) => {
+            if (prev.length === 0) {
+              return [
+                {
+                  bucket: now.toISOString(),
+                  room_id: targetRoomId,
+                  temperature: temp !== undefined ? Number(temp.toFixed(1)) : 25.0,
+                  humidity: hum !== undefined ? Number(hum.toFixed(1)) : 60.0,
+                  smoke: smokeNum ? Number(smokeNum.toFixed(1)) : 0,
+                  co2: co2 !== undefined ? Math.round(co2) : 400,
+                  air_quality: aqi,
+                  time_label: timeLabel,
+                },
+              ];
+            }
+
+            const last = prev[prev.length - 1];
+            const newPoint: TelemetryPoint = {
+              bucket: now.toISOString(),
+              room_id: targetRoomId,
+              temperature: temp !== undefined ? Number(temp.toFixed(1)) : (last.temperature ?? 25.0),
+              humidity: hum !== undefined ? Number(hum.toFixed(1)) : (last.humidity ?? 60.0),
+              smoke: smokeNum ? Number(smokeNum.toFixed(1)) : (last.smoke ?? 0),
+              co2: co2 !== undefined ? Math.round(co2) : (last.co2 ?? 400),
+              air_quality: aqi,
+              time_label: timeLabel,
+            };
+
+            if (last.time_label === timeLabel) {
+              const copy = [...prev];
+              copy[copy.length - 1] = newPoint;
+              return copy;
+            } else {
+              const updated = [...prev, newPoint];
+              return updated.slice(-30);
+            }
+          });
+        }
+      }
+    });
+
+    return unsub;
+  }, [selectedRoomId]);
+
   const currentRoomObj = rooms.find((r) => r.id === selectedRoomId);
   const currentRoomName = currentRoomObj?.name || (selectedRoomId ? selectedRoomId.slice(0, 8) : "Toàn trường");
+
+  // Giá trị realtime từ currentRoomObj (đồng bộ tức thì khi MQTT cập nhật rooms)
+  let liveRoomVal: number | null = null;
+  if (currentRoomObj) {
+    if (selectedMetric === "temperature" && currentRoomObj.temp) {
+      const v = parseFloat(currentRoomObj.temp.replace("°C", "").trim());
+      if (!isNaN(v)) liveRoomVal = v;
+    } else if (selectedMetric === "humidity" && currentRoomObj.humidity) {
+      const v = parseFloat(currentRoomObj.humidity.replace("%", "").trim());
+      if (!isNaN(v)) liveRoomVal = v;
+    } else if (selectedMetric === "co2" && currentRoomObj.co2) {
+      const v = parseFloat(currentRoomObj.co2.replace("ppm", "").trim());
+      if (!isNaN(v)) liveRoomVal = v;
+    } else if (selectedMetric === "smoke" && currentRoomObj.smoke) {
+      const v = parseFloat(currentRoomObj.smoke.replace("ppm", "").trim());
+      if (!isNaN(v)) liveRoomVal = v;
+    }
+  }
+
+  const metricValues = telemetryPoints.map((p) => p[selectedMetric] || 0);
+  if (metricValues.length > 0 && liveRoomVal !== null && !isNaN(liveRoomVal)) {
+    metricValues[metricValues.length - 1] = liveRoomVal;
+  }
+
+  const currentVal =
+    liveRoomVal !== null && !isNaN(liveRoomVal)
+      ? liveRoomVal
+      : (metricValues[metricValues.length - 1] ?? 0);
 
   const metricUnit =
     selectedMetric === "temperature" ? "°C" :
@@ -996,12 +1104,20 @@ function HistoryPage({ devices, rooms }: { devices: DeviceItem[]; rooms: Room[] 
                     )}
                   </svg>
                   <div className="chart-labels">
-                    {telemetryPoints
-                      .filter((_, i) => i % Math.max(1, Math.floor(telemetryPoints.length / 5)) === 0)
-                      .map((p, idx) => (
-                        <span key={idx}>{p.time_label}</span>
-                      ))}
-                    <span>Hiện tại</span>
+                    {(() => {
+                      if (telemetryPoints.length === 0) return <span>Hiện tại</span>;
+                      const step = Math.max(1, Math.floor(telemetryPoints.length / 5));
+                      const sampled = telemetryPoints.filter((_, i) => i % step === 0);
+                      const unique = sampled.filter((p, i, arr) => arr.findIndex((x) => x.time_label === p.time_label) === i);
+                      return (
+                        <>
+                          {unique.map((p, idx) => (
+                            <span key={idx}>{p.time_label}</span>
+                          ))}
+                          <span>Hiện tại</span>
+                        </>
+                      );
+                    })()}
                   </div>
                 </>
               )}
@@ -1872,8 +1988,25 @@ function AssistantPage({
       }
 
       // 3. Tự động thực thi nếu Autopilot đang BẬT (!hitlEnabled)
+      const CRITICAL_SAFETY_TOOLS = ["set_door", "door_control", "set_mode", "mode_control", "trigger_buzzer", "buzzer_control"];
       if (rec) {
         if (!hitlEnabled) {
+          const isCritical = CRITICAL_SAFETY_TOOLS.includes(rec.toLowerCase().trim());
+          if (isCritical) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "ai",
+                text: reply,
+                rec,
+                recParams,
+                autoExecuted: false,
+                execMessage: `🔒 [SAFETY POLICY]: Lệnh an ninh nhạy cảm '${rec}' bắt buộc phải có Quản trị viên phê duyệt xác nhận qua HITL, Autopilot không được phép tự động kích hoạt!`,
+              },
+            ]);
+            return;
+          }
+
           const targetRoomId = recParams.room_id || selectedRoomId || selectedRoom?.id;
           try {
             await directExecuteTool(
@@ -2262,13 +2395,17 @@ function RoomDrawer({
   const maxHumid = stats?.humidity ? `${stats.humidity.max}%` : "-";
   const avgHumid = stats?.humidity ? `${stats.humidity.avg}%` : "-";
 
-  const minCo2 = stats?.co2 ? `${stats.co2.min}` : "-";
-  const maxCo2 = stats?.co2 ? `${stats.co2.max}` : "-";
-  const avgCo2 = stats?.co2 ? `${stats.co2.avg}` : "-";
+  const minCo2 = stats?.co2 ? `${Math.round(stats.co2.min)} ppm` : "-";
+  const maxCo2 = stats?.co2 ? `${Math.round(stats.co2.max)} ppm` : "-";
+  const avgCo2 = stats?.co2 ? `${Math.round(stats.co2.avg)} ppm` : "-";
 
-  const minSmoke = stats?.smoke ? `${stats.smoke.min}` : "-";
-  const maxSmoke = stats?.smoke ? `${stats.smoke.max}` : "-";
-  const avgSmoke = stats?.smoke ? `${stats.smoke.avg}` : "-";
+  const minSmoke = stats?.smoke ? `${Math.round(stats.smoke.min)} ppm` : "-";
+  const maxSmoke = stats?.smoke ? `${Math.round(stats.smoke.max)} ppm` : "-";
+  const avgSmoke = stats?.smoke ? `${Math.round(stats.smoke.avg)} ppm` : "-";
+
+  const smokeDisplay = stats?.smoke?.latest !== undefined
+    ? `${Math.round(stats.smoke.latest)} ppm · ${room.smoke || "Bình thường"}`
+    : (room.smoke ? `120 ppm · ${room.smoke}` : "120 ppm · Bình thường");
 
   const currentOcc = room.occupancy ?? stats?.occupancy?.current ?? 0;
   const totalIn = Math.max(stats?.occupancy?.total_in ?? 0, currentOcc);
@@ -2360,10 +2497,10 @@ function RoomDrawer({
             <p className="window">{loadingStats ? "Đang tải TimescaleDB..." : "15 phút gần nhất · TimescaleDB"}</p>
             <div className="telemetry-grid">
               {[
-                ["Nhiệt độ", room.temp, minTemp, maxTemp, avgTemp],
-                ["Độ ẩm", room.humidity, minHumid, maxHumid, avgHumid],
-                ["CO₂", room.co2, minCo2, maxCo2, avgCo2],
-                ["Khói", room.smoke, minSmoke, maxSmoke, avgSmoke],
+                ["Nhiệt độ (°C)", room.temp, minTemp, maxTemp, avgTemp],
+                ["Độ ẩm (%)", room.humidity, minHumid, maxHumid, avgHumid],
+                ["Khí CO₂ (ppm)", room.co2, minCo2, maxCo2, avgCo2],
+                ["Khói MQ-2 (ppm)", smokeDisplay, minSmoke, maxSmoke, avgSmoke],
               ].map((r) => (
                 <div key={r[0]}>
                   <span>{r[0]}</span>
@@ -3036,9 +3173,19 @@ export default function App() {
         const normMode = rawMode ? String(rawMode).trim().toUpperCase().replace("-", "_") : undefined;
 
         if (targetRoomId) {
+          const matchRoom = (rId: string, tId?: string) => {
+            if (!tId) return false;
+            if (rId === tId) return true;
+            const c1 = rId.replace(/-/g, "").toLowerCase();
+            const c2 = tId.replace(/-/g, "").toLowerCase();
+            return c1 === c2 || c1.startsWith(c2) || c2.startsWith(c1);
+          };
+
+          const rawSmoke = innerData.smoke ?? innerData.smoke_value ?? innerData.smoke_state;
+
           setRooms((prev) =>
             prev.map((r) => {
-              if (r.id !== targetRoomId) return r;
+              if (!matchRoom(r.id, targetRoomId)) return r;
               const updated = { ...r };
               if (normMode) updated.mode = normMode;
               if (innerData.temperature !== undefined && innerData.temperature !== null) {
@@ -3050,8 +3197,8 @@ export default function App() {
               if (innerData.co2 !== undefined && innerData.co2 !== null) {
                 updated.co2 = `${innerData.co2} ppm`;
               }
-              if (innerData.smoke !== undefined) {
-                updated.smoke = String(innerData.smoke);
+              if (rawSmoke !== undefined && rawSmoke !== null) {
+                updated.smoke = typeof rawSmoke === "number" ? `${rawSmoke} ppm` : String(rawSmoke);
               }
               if (innerData.occupancy !== undefined && innerData.occupancy !== null) {
                 updated.occupancy = Number(innerData.occupancy);
@@ -3079,7 +3226,7 @@ export default function App() {
           );
 
           setSelectedRoom((prev) => {
-            if (!prev || prev.id !== targetRoomId) return prev;
+            if (!prev || !matchRoom(prev.id, targetRoomId)) return prev;
             const updated = { ...prev };
             if (normMode) updated.mode = normMode;
             if (innerData.temperature !== undefined && innerData.temperature !== null) {
@@ -3090,6 +3237,9 @@ export default function App() {
             }
             if (innerData.co2 !== undefined && innerData.co2 !== null) {
               updated.co2 = `${innerData.co2} ppm`;
+            }
+            if (rawSmoke !== undefined && rawSmoke !== null) {
+              updated.smoke = typeof rawSmoke === "number" ? `${rawSmoke} ppm` : String(rawSmoke);
             }
             if (innerData.occupancy !== undefined && innerData.occupancy !== null) {
               updated.occupancy = Number(innerData.occupancy);
