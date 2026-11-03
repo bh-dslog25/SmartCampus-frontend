@@ -268,7 +268,8 @@ export async function getRecommendations(status = "all"): Promise<Recommendation
 export async function executeRecommendation(
   recId: string,
   action: "approve" | "reject",
-  notes?: string
+  notes?: string,
+  payloadHash?: string
 ): Promise<any> {
   const cleanId = String(recId || "").trim();
   if (!cleanId || cleanId === "undefined" || cleanId === "null") {
@@ -277,7 +278,7 @@ export async function executeRecommendation(
   const res = await authFetch(`/api/recommendations/${cleanId}/execute`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, notes }),
+    body: JSON.stringify({ action, notes, payload_hash: payloadHash }),
   });
   if (!res.ok) {
     const errText = await res.text();

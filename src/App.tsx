@@ -3384,7 +3384,9 @@ export default function App() {
       );
       return res;
     }
-    const result = await executeRecommendation(id, action, notes);
+    const shownHash = (recommendations.find((r: any) => r.id === id) as any)?.payload_hash
+      ?? (selectedRec as any)?.payload_hash;
+    const result = await executeRecommendation(id, action, notes, shownHash);
     setRecommendations((prev) =>
       prev.map((r) =>
         r.id === id ? { ...r, status: action === "approve" ? "approved" : "rejected" } : r
